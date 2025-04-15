@@ -220,6 +220,76 @@ static gpointer raw_data_handle_thread_func(gpointer user_data)
 	return NULL;
 }
 
+// to find out the maixmum size of ONE transfer
+static int train_bulk_in_transfer(struct dev_context *devc, libusb_device_handle *dev_handle) {
+	struct libusb_transfer *transfer = libusb_alloc_transfer(0);
+	if (!transfer) {
+		sr_err("Failed to allocate libusb transfer!");
+		return SR_ERR_IO;
+	}
+	transfer->flags |= LIBUSB_TRANSFER_FREE_BUFFER;
+	transfer->flags |= LIBUSB_TRANSFER_FREE_TRANSFER;
+
+	uint64_t sr = devc->cur_samplerate;
+	uint64_t ch = devc->cur_samplechannel;
+	uint64_t bps = sr * ch;
+	uint64_t Bps = bps / 8;
+	uint64_t BpMs = Bps / SR_KHZ(1);
+
+	uint64_t cur_transfer_duration = 125 /* ms */;
+	uint64_t try_transfer_nbytes = cur_transfer_duration * BpMs /* bytes */;
+
+	const uint64_t ALIGN_SIZE = 32*1024; /* 32kiB */
+	do {
+		// Align up
+		try_transfer_nbytes = (try_transfer_nbytes + (ALIGN_SIZE-1)) & ~(ALIGN_SIZE-1);
+
+		uint8_t *transfer_buffer = malloc(try_transfer_nbytes);
+		if (!transfer_buffer) {
+			sr_dbg("Failed to allocate memory: %u bytes! Half it.", try_transfer_nbytes);
+			try_transfer_nbytes >>= 1;
+			continue;
+		}
+
+		cur_transfer_duration = try_transfer_nbytes / BpMs;
+		sr_dbg("Train: receive %u bytes per %ums...", try_transfer_nbytes, cur_transfer_duration);
+
+		libusb_fill_bulk_transfer(transfer, dev_handle, devc->model->ep_in,
+									transfer_buffer, try_transfer_nbytes,
+									NULL, NULL, 0);
+		int ret = libusb_submit_transfer(transfer);
+		if (ret) {
+			sr_dbg("Failed to submit transfer: %s!", libusb_error_name(ret));
+			if (ret == LIBUSB_ERROR_NO_MEM) {
+				free(transfer->buffer);
+				sr_dbg("Half it and try again.");
+				try_transfer_nbytes >>= 1;
+				continue;
+			} else {
+				libusb_free_transfer(transfer);
+				return SR_ERR_IO;
+			}
+		}
+
+		ret = libusb_cancel_transfer(transfer);
+		if (ret) {
+			sr_dbg("Failed to cancel transfer: %s!", libusb_error_name(ret));
+		}
+
+		try_transfer_nbytes >>= 1; // At least 2 transfets can be pending.
+		break;
+	} while (try_transfer_nbytes > ALIGN_SIZE); // 32kiB > 125ms * 1MHZ * 2ch
+
+	cur_transfer_duration = try_transfer_nbytes / BpMs;
+	sr_dbg("Choose: receive %u bytes per %ums :)", try_transfer_nbytes, cur_transfer_duration);
+
+	// Assign
+	devc->per_transfer_duration =  cur_transfer_duration;
+	devc->per_transfer_nbytes = try_transfer_nbytes;
+
+	return SR_OK;
+}
+
 SR_PRIV int sipeed_slogic_acquisition_start(const struct sr_dev_inst *sdi)
 {
 	struct sr_dev_driver *di;
@@ -249,60 +319,10 @@ SR_PRIV int sipeed_slogic_acquisition_start(const struct sr_dev_inst *sdi)
 			1000 * devc->cur_limit_samples / devc->cur_samplerate
 	);
 
-	devc->per_transfer_duration = 125;
-	devc->per_transfer_nbytes = devc->per_transfer_duration * devc->cur_samplerate * devc->cur_samplechannel / 8 / SR_KHZ(1) /* ms */;
-
-	do {
-		struct libusb_transfer *transfer = libusb_alloc_transfer(0);
-		if (!transfer) {
-			sr_err("Failed to allocate libusb transfer!");
-			return SR_ERR_IO;
-		}
-		do {
-			devc->per_transfer_nbytes = (devc->per_transfer_nbytes + (2*16*1024-1)) & ~(2*16*1024-1);
-			devc->per_transfer_duration = devc->per_transfer_nbytes * SR_KHZ(1) * 8 / (devc->cur_samplerate * devc->cur_samplechannel);
-			sr_dbg("Plan to receive %u bytes per %ums...", devc->per_transfer_nbytes, devc->per_transfer_duration);
-			
-			uint8_t *dev_buf = g_malloc(devc->per_transfer_nbytes);
-			if (!dev_buf) {
-				sr_dbg("Failed to allocate memory: %u bytes! Half .", devc->per_transfer_nbytes);
-				devc->per_transfer_nbytes >>= 1;
-				continue;
-			}
-
-			libusb_fill_bulk_transfer(transfer, usb->devhdl, devc->model->ep_in,
-										dev_buf, devc->per_transfer_nbytes, NULL,
-										NULL, 0);
-
-			ret = libusb_submit_transfer(transfer);
-			if (ret) {
-				g_free(transfer->buffer);
-				if (ret == LIBUSB_ERROR_NO_MEM) {
-					sr_dbg("Failed to submit transfer: %s!", libusb_error_name(ret));
-					devc->per_transfer_nbytes >>= 1;
-					continue;
-				} else {
-					sr_err("Failed to submit transfer: %s!", libusb_error_name(ret));
-					libusb_free_transfer(transfer);
-					return SR_ERR_IO;
-				}
-			} else {
-				ret = libusb_cancel_transfer(transfer);
-				if (ret) {
-                    sr_dbg("Failed to cancel transfer: %s!", libusb_error_name(ret));
-                }
-                libusb_handle_events_timeout_completed(drvc->sr_ctx->libusb_ctx, &(struct timeval){3, 0}, NULL);
-				g_free(transfer->buffer);
-
-				devc->per_transfer_nbytes >>= 1;
-				devc->per_transfer_duration = devc->per_transfer_nbytes / (devc->cur_samplerate / SR_KHZ(1) * devc->cur_samplechannel / 8);
-				break;
-			}
-		} while (devc->per_transfer_nbytes > 32*1024); // 32kiB > 125ms * 1MHZ * 2ch
-		libusb_free_transfer(transfer);
-		sr_info("Nice plan! :) => %u bytes per %ums.", devc->per_transfer_nbytes, devc->per_transfer_duration);
-	} while (0);
-
+	if ((ret = train_bulk_in_transfer(devc, usb->devhdl)) != SR_OK) {
+		sr_err("Failed to train bulk_in_transfer!`");
+		return ret;
+	}
 
 	devc->acq_aborted = 0;
 	devc->num_transfers_used = 0;

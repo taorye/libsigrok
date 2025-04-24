@@ -31,7 +31,6 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer) {
 	if (!sdi)
 		return;
 	devc = sdi->priv;
-	usb  = sdi->conn;
 
 	int64_t transfers_reached_time_now = g_get_monotonic_time();
 	int64_t transfers_reached_duration = transfers_reached_time_now - devc->transfers_reached_time_latest;
@@ -323,6 +322,7 @@ SR_PRIV int sipeed_slogic_acquisition_start(const struct sr_dev_inst *sdi)
 		sr_err("Failed to train bulk_in_transfer!`");
 		return ret;
 	}
+	libusb_handle_events_timeout_completed(drvc->sr_ctx->libusb_ctx, &(struct timeval){1, 0}, NULL);
 
 	devc->acq_aborted = 0;
 	devc->num_transfers_used = 0;

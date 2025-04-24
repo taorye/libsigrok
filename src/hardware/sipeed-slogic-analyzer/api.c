@@ -626,6 +626,41 @@ static int slogic16U3_remote_run(const struct sr_dev_inst *sdi) {
 		}
 	}
 
+	{
+		size_t retry = 0;
+		memset(cmd_aux, 0, sizeof(cmd_aux));
+		*(uint32_t*)(cmd_aux) = 0x00000003;
+		slogic_usb_control_write(sdi, SLOGIC16U3_CONTROL_OUT_REQ_REG_WRITE, SLOGIC16U3_R32_AUX, 0x0000, cmd_aux, 4, 500);
+		do {
+			slogic_usb_control_read(sdi, SLOGIC16U3_CONTROL_IN_REQ_REG_READ, SLOGIC16U3_R32_AUX, 0x0000, cmd_aux, 4, 500);
+			sr_dbg("[%u]read vref(/1024x3v3): %08x.", retry, ((uint32_t*)cmd_aux)[0]);
+			retry += 1;
+			if (retry > 5)
+				return SR_ERR_TIMEOUT;
+		} while (!(cmd_aux[2] & 0x01));
+		// *(uint16_t*)cmd_aux &= ~0xfe00;
+		// *(uint16_t*)cmd_aux |= 0x800;
+		sr_dbg("vref length: %u.", (*(uint16_t*)cmd_aux)>>9);
+		slogic_usb_control_read(sdi, SLOGIC16U3_CONTROL_IN_REQ_REG_READ, SLOGIC16U3_R32_AUX + 4, 0x0000, cmd_aux + 4, (*(uint16_t*)cmd_aux)>>9, 500);
+
+		sr_dbg("aux: %u %u %u %u %08x.", cmd_aux[0], cmd_aux[1], cmd_aux[2], cmd_aux[3], ((uint32_t*)(cmd_aux+4))[0]);
+
+		((uint32_t*)(cmd_aux+4))[0] = 1024/2;
+
+		sr_dbg("aux: %u %u %u %u %08x.", cmd_aux[0], cmd_aux[1], cmd_aux[2], cmd_aux[3], ((uint32_t*)(cmd_aux+4))[0]);
+		slogic_usb_control_write(sdi, SLOGIC16U3_CONTROL_OUT_REQ_REG_WRITE, SLOGIC16U3_R32_AUX + 4, 0x0000, cmd_aux + 4, (*(uint16_t*)cmd_aux)>>9, 500);
+
+		slogic_usb_control_read(sdi, SLOGIC16U3_CONTROL_IN_REQ_REG_READ, SLOGIC16U3_R32_AUX + 4, 0x0000, cmd_aux + 4, (*(uint16_t*)cmd_aux)>>9, 500);
+		sr_dbg("aux: %u %u %u %u %08x.", cmd_aux[0], cmd_aux[1], cmd_aux[2], cmd_aux[3], ((uint32_t*)(cmd_aux+4))[0]);
+
+		if (1024 != *(uint32_t*)(cmd_aux+4)) {
+			sr_dbg("Failed to configure vref.");
+		} else {
+			sr_dbg("Succeed to configure vref.");
+		}
+	}
+
+
 	return slogic_usb_control_write(sdi, SLOGIC16U3_CONTROL_OUT_REQ_REG_WRITE, SLOGIC16U3_R32_CTRL, 0x0000, ARRAY_AND_SIZE(cmd_run), 500);
 }
 

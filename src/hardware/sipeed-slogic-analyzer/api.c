@@ -30,11 +30,12 @@ static const uint32_t drvopts[] = {
 
 static const uint32_t devopts[] = {
 	SR_CONF_CONTINUOUS,
-	SR_CONF_LIMIT_SAMPLES | SR_CONF_GET | SR_CONF_SET,
-	SR_CONF_SAMPLERATE    | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
 	SR_CONF_BUFFERSIZE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
+	SR_CONF_LIMIT_SAMPLES | SR_CONF_GET | SR_CONF_SET,
 	SR_CONF_PATTERN_MODE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
+	SR_CONF_SAMPLERATE    | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
 	SR_CONF_TRIGGER_MATCH | SR_CONF_GET | SR_CONF_LIST,
+	SR_CONF_VOLTAGE_THRESHOLD | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
 };
 
 
@@ -218,6 +219,7 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 				devc->cur_samplechannel = devc->limit_samplechannel;
 				devc->cur_samplerate = devc->limit_samplerate;
 				devc->cur_pattern_mode_idx = PATTERN_MODE_NOMAL;
+				devc->voltage_threshold[0] = devc->voltage_threshold[1] = 0.8f;
 
 				devc->digital_group = sr_channel_group_new(sdi, "LA", NULL);
 				for (i = 0; i < devc->model->max_samplechannel; i++) {
@@ -334,6 +336,9 @@ static int config_get(uint32_t key, GVariant **data,
 	case SR_CONF_LIMIT_SAMPLES:
 		*data = g_variant_new_uint64(devc->cur_limit_samples);
 		break;
+	case SR_CONF_VOLTAGE_THRESHOLD:
+		*data = std_gvar_tuple_double(devc->voltage_threshold[0], devc->voltage_threshold[1]);
+		break;
 	default:
 		return SR_ERR_NA;
 	}
@@ -396,6 +401,9 @@ static int config_set(uint32_t key, GVariant *data,
 	case SR_CONF_LIMIT_SAMPLES:
 		devc->cur_limit_samples = g_variant_get_uint64(data);
 		break;
+	case SR_CONF_VOLTAGE_THRESHOLD:
+		g_variant_get(data, "(dd)", &devc->voltage_threshold[0], &devc->voltage_threshold[1]);
+		break;
 	default:
 		ret = SR_ERR_NA;
 	}
@@ -430,6 +438,9 @@ static int config_list(uint32_t key, GVariant **data,
 		break;
 	case SR_CONF_TRIGGER_MATCH:
 		*data = std_gvar_array_i32(ARRAY_AND_SIZE(trigger_matches));
+		break;
+	case SR_CONF_VOLTAGE_THRESHOLD:
+		*data = std_gvar_min_max_step_thresholds(0, 1.6, 0.1);
 		break;
 	default:
 		ret = SR_ERR_NA;
@@ -633,7 +644,7 @@ static int slogic16U3_remote_run(const struct sr_dev_inst *sdi) {
 		slogic_usb_control_write(sdi, SLOGIC16U3_CONTROL_OUT_REQ_REG_WRITE, SLOGIC16U3_R32_AUX, 0x0000, cmd_aux, 4, 500);
 		do {
 			slogic_usb_control_read(sdi, SLOGIC16U3_CONTROL_IN_REQ_REG_READ, SLOGIC16U3_R32_AUX, 0x0000, cmd_aux, 4, 500);
-			sr_dbg("[%u]read vref(/1024x3v3): %08x.", retry, ((uint32_t*)cmd_aux)[0]);
+			sr_dbg("[%u]read vref(/1024x1v6): %08x.", retry, ((uint32_t*)cmd_aux)[0]);
 			retry += 1;
 			if (retry > 5)
 				return SR_ERR_TIMEOUT;
@@ -645,7 +656,7 @@ static int slogic16U3_remote_run(const struct sr_dev_inst *sdi) {
 
 		sr_dbg("aux: %u %u %u %u %08x.", cmd_aux[0], cmd_aux[1], cmd_aux[2], cmd_aux[3], ((uint32_t*)(cmd_aux+4))[0]);
 
-		((uint32_t*)(cmd_aux+4))[0] = 1024/2;
+		((uint32_t*)(cmd_aux+4))[0] = (uint32_t)((devc->voltage_threshold[0]+devc->voltage_threshold[1])/2/1.65 * 1023);
 
 		sr_dbg("aux: %u %u %u %u %08x.", cmd_aux[0], cmd_aux[1], cmd_aux[2], cmd_aux[3], ((uint32_t*)(cmd_aux+4))[0]);
 		slogic_usb_control_write(sdi, SLOGIC16U3_CONTROL_OUT_REQ_REG_WRITE, SLOGIC16U3_R32_AUX + 4, 0x0000, cmd_aux + 4, (*(uint16_t*)cmd_aux)>>9, 500);

@@ -45,6 +45,25 @@ static int slogic_combo8_remote_stop(const struct sr_dev_inst *sdi);
 static int slogic16U3_remote_run(const struct sr_dev_inst *sdi);
 static int slogic16U3_remote_stop(const struct sr_dev_inst *sdi);
 
+static gpointer libusb_event_thread_func(gpointer user_data)
+{
+	struct sr_dev_inst *sdi;
+	struct sr_dev_driver *di;
+	struct dev_context *devc;
+	struct drv_context *drvc;
+
+	sdi = user_data;
+	devc = sdi->priv;
+	di = sdi->driver;
+	drvc = di->context;
+
+	while (devc->libusb_event_thread_run) {
+		libusb_handle_events_timeout_completed(drvc->sr_ctx->libusb_ctx, &(struct timeval){1, 0}, NULL);
+	}
+
+	return NULL;
+}
+
 static const struct slogic_model support_models[] = {
 	{
 		.name = "Sogic Combo 8",
@@ -277,6 +296,14 @@ static int dev_open(struct sr_dev_inst *sdi)
 		return SR_ERR;
 	}
 
+	devc->libusb_event_thread_run = 1;
+	devc->libusb_event_thread = g_thread_new("libusb_event_thread", libusb_event_thread_func, sdi);
+	if (!devc->libusb_event_thread) {
+		devc->libusb_event_thread_run = 0;
+		sr_err("Unable to new libusb_event_thread!");
+		return SR_ERR_MALLOC;
+	}
+
 	return std_dummy_dev_open(sdi);
 }
 
@@ -307,7 +334,12 @@ static int dev_close(struct sr_dev_inst *sdi)
 		}
 	}
 
+	devc->libusb_event_thread_run = 0;
 	sr_usb_close(usb);
+	if (devc->libusb_event_thread) {
+		g_thread_join(devc->libusb_event_thread);
+		devc->libusb_event_thread = NULL;
+	}
 
 	return std_dummy_dev_close(sdi);
 }
@@ -481,7 +513,7 @@ static void slogic_submit_raw_data(void *data, size_t len, const struct sr_dev_i
 
 	if (nCh < 8) {
 		size_t nsp_in_bytes = 8 / nCh; // NOW must be 2 and 4
-		ptr = g_malloc(len * nsp_in_bytes);
+		ptr = malloc(len * nsp_in_bytes);
 		for(size_t i=0; i<len; i+=nCh) {
 			for(size_t j=0; j<8; j++) {
 				ptr[i*nsp_in_bytes+j] = (((uint8_t *)data)[i+j/nsp_in_bytes] >> (j%nsp_in_bytes*nCh)) & ((1<<nCh)-1);
@@ -500,7 +532,7 @@ static void slogic_submit_raw_data(void *data, size_t len, const struct sr_dev_i
 	});
 
 	if (nCh < 8)
-		g_free(ptr);
+		free(ptr);
 }
 
 /* SLogic Combo 8 start */

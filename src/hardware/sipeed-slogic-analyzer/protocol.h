@@ -69,6 +69,9 @@ struct dev_context {
 	}; // configuration
 
 	struct {
+		GThread *libusb_event_thread;
+		int libusb_event_thread_run;
+
 		enum libusb_speed speed;
 
 		uint64_t samples_need_nbytes;
@@ -86,7 +89,6 @@ struct dev_context {
 		int64_t transfers_reached_time_start;
 		int64_t transfers_reached_time_latest;
 
-		GThread *raw_data_handle_thread;
 		GAsyncQueue *raw_data_queue;
 		uint64_t timeout_count;
 	}; // usb

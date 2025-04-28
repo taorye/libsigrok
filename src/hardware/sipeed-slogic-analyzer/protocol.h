@@ -1,7 +1,8 @@
 /*
  * This file is part of the libsigrok project.
  *
- * Copyright (C) 2023-2025 Shenzhen Sipeed Technology Co., Ltd. (深圳市矽速科技有限公司) <support@sipeed.com>
+ * Copyright (C) 2023-2025 Shenzhen Sipeed Technology Co., Ltd.
+ * (深圳市矽速科技有限公司) <support@sipeed.com>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,10 +21,12 @@
 #ifndef LIBSIGROK_HARDWARE_SIPEED_SLOGIC_ANALYZER_PROTOCOL_H
 #define LIBSIGROK_HARDWARE_SIPEED_SLOGIC_ANALYZER_PROTOCOL_H
 
-#include <stdint.h>
 #include <glib.h>
 #include <libusb.h>
+#include <stdint.h>
+
 #include <libsigrok/libsigrok.h>
+
 #include "libsigrok-internal.h"
 
 #define LOG_PREFIX "sipeed-slogic-analyzer"
@@ -48,7 +51,8 @@ struct slogic_model {
 		int (*remote_run)(const struct sr_dev_inst *sdi);
 		int (*remote_stop)(const struct sr_dev_inst *sdi);
 	} operation;
-	void (*submit_raw_data)(void *data, size_t len, const struct sr_dev_inst *sdi);
+	void (*submit_raw_data)(void *data, size_t len,
+				const struct sr_dev_inst *sdi);
 };
 
 struct dev_context {

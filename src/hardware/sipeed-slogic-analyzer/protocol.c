@@ -37,7 +37,7 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer) {
 
 	devc->num_transfers_used -= 1;
 	devc->num_transfers_completed += 1;
-	sr_spew("[%d] Transfer of %d status: %d(%s).",
+	sr_spew("[%d] Transfer #%d status: %d(%s).",
 		devc->num_transfers_completed,
 		std_u64_idx(
 			g_variant_new_uint64((uint64_t)transfer), (uint64_t*)devc->transfers, NUM_MAX_TRANSFERS
@@ -65,10 +65,6 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer) {
 				(double)transfers_reached_duration / SR_KHZ(1),
 				(double)transfers_all_duration / SR_KHZ(1)
 			);
-
-			if (transfer->actual_length == 0) {
-				break;
-			}
 
 			/* TODO: move out submit to ensure continuous transfers */
 			if (devc->raw_data_queue && devc->cur_pattern_mode_idx != PATTERN_MODE_TEST_MAX_SPEED) {
@@ -105,8 +101,8 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer) {
 		case LIBUSB_TRANSFER_OVERFLOW:
 		case LIBUSB_TRANSFER_STALL:
 		case LIBUSB_TRANSFER_NO_DEVICE:
-			devc->acq_aborted = 1;
 		default:
+			devc->acq_aborted = 1;
 			break;
 	}
 
@@ -162,23 +158,24 @@ static int handle_events(int fd, int revents, void *cb_data)
 				if (transfer) {
 					freed += 1;
 					libusb_free_transfer(transfer);
+					devc->transfers[i] = NULL;
 				}
-				devc->transfers[i] = NULL;
 			}
 			if (freed) {
 				sr_dbg("Freed %d transfers.", freed);
 			} else if (!g_async_queue_length(devc->raw_data_queue)) {
 				sr_dbg("Freed all transfers.");
-				sr_info("Bulk in %u/%u bytes with %u transfers.", devc->samples_got_nbytes, devc->samples_need_nbytes, devc->num_transfers_completed);
-				std_session_send_df_end(sdi);
 				g_async_queue_unref(devc->raw_data_queue);
 				devc->raw_data_queue = NULL;
-				sr_session_source_remove(sdi->session, -1 * (size_t)drvc->sr_ctx->libusb_ctx);
 			}
 		}
 	}
 
-	if (devc->raw_data_queue && g_async_queue_length(devc->raw_data_queue)) {
+	if (!devc->raw_data_queue) {
+		sr_info("Bulk in %u/%u bytes with %u transfers.", devc->samples_got_nbytes, devc->samples_need_nbytes, devc->num_transfers_completed);
+		std_session_send_df_end(sdi);
+		sr_session_source_remove(sdi->session, -1 * (size_t)drvc->sr_ctx->libusb_ctx);
+	} else if (g_async_queue_length(devc->raw_data_queue)) {
 		GByteArray *array = g_async_queue_try_pop(devc->raw_data_queue);
 		if (array != NULL) {
 			if (!devc->acq_aborted) {

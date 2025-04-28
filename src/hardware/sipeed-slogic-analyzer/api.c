@@ -38,65 +38,6 @@ static const uint32_t devopts[] = {
 	SR_CONF_VOLTAGE_THRESHOLD | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
 };
 
-
-static void slogic_submit_raw_data(void *data, size_t len, const struct sr_dev_inst *sdi);
-static int slogic_combo8_remote_run(const struct sr_dev_inst *sdi);
-static int slogic_combo8_remote_stop(const struct sr_dev_inst *sdi);
-static int slogic16U3_remote_run(const struct sr_dev_inst *sdi);
-static int slogic16U3_remote_stop(const struct sr_dev_inst *sdi);
-
-static gpointer libusb_event_thread_func(gpointer user_data)
-{
-	struct sr_dev_inst *sdi;
-	struct sr_dev_driver *di;
-	struct dev_context *devc;
-	struct drv_context *drvc;
-
-	sdi = user_data;
-	devc = sdi->priv;
-	di = sdi->driver;
-	drvc = di->context;
-
-	while (devc->libusb_event_thread_run) {
-		libusb_handle_events_timeout_completed(drvc->sr_ctx->libusb_ctx, &(struct timeval){1, 0}, NULL);
-	}
-
-	return NULL;
-}
-
-static const struct slogic_model support_models[] = {
-	{
-		.name = "Sogic Combo 8",
-		.pid = 0x0300,
-		.ep_in = 0x01 | LIBUSB_ENDPOINT_IN,
-		.max_samplerate = SR_MHZ(160),
-		.max_samplechannel = 8,
-		.max_bandwidth = SR_MHZ(320),
-		.operation = {
-			.remote_run = slogic_combo8_remote_run,
-			.remote_stop = slogic_combo8_remote_stop,
-		},
-		.submit_raw_data = slogic_submit_raw_data,
-	},
-	{
-		.name = "SLogic16U3",
-		.pid = 0x3031,
-		.ep_in = 0x02 | LIBUSB_ENDPOINT_IN,
-		.max_samplerate = SR_MHZ(1600),
-		.max_samplechannel = 16,
-		.max_bandwidth = SR_MHZ(3200),
-		.operation = {
-			.remote_run = slogic16U3_remote_run,
-			.remote_stop = slogic16U3_remote_stop,
-		},
-		.submit_raw_data = slogic_submit_raw_data,
-	},
-	{
-		.name = NULL,
-		.pid = 0x0000,
-	}
-};
-
 static const uint64_t samplerates[] = {
 	/* 160M = 2^5*5M */
 	/* 1600M = 2^6*5^2M */
@@ -135,10 +76,8 @@ static const uint64_t buffersizes[] = {
 };
 
 static const char *patterns[] = {
-#define GEN_PATTERN(P) [P] = #P
-	GEN_PATTERN(PATTERN_MODE_NOMAL),
-	GEN_PATTERN(PATTERN_MODE_TEST_MAX_SPEED),
-#undef GEN_PATTERN
+	[PATTERN_MODE_NOMAL] = "PATTERN_MODE_NOMAL",
+	[PATTERN_MODE_TEST_MAX_SPEED] = "PATTERN_MODE_TEST_MAX_SPEED",
 };
 
 static const int32_t trigger_matches[] = {
@@ -150,6 +89,27 @@ static const int32_t trigger_matches[] = {
 };
 
 static struct sr_dev_driver sipeed_slogic_analyzer_driver_info;
+
+static struct slogic_model *const support_models_ptr;
+
+static gpointer libusb_event_thread_func(gpointer user_data)
+{
+	struct sr_dev_inst *sdi;
+	struct sr_dev_driver *di;
+	struct dev_context *devc;
+	struct drv_context *drvc;
+
+	sdi = user_data;
+	devc = sdi->priv;
+	di = sdi->driver;
+	drvc = di->context;
+
+	while (devc->libusb_event_thread_run) {
+		libusb_handle_events_timeout_completed(drvc->sr_ctx->libusb_ctx, &(struct timeval){1, 0}, NULL);
+	}
+
+	return NULL;
+}
 
 static GSList *scan(struct sr_dev_driver *di, GSList *options)
 {
@@ -196,7 +156,7 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 		}
 	}
 
-	for (model = &support_models[0]; model->name; model++) {
+	for (model = support_models_ptr; model->name; model++) {
 		conn = g_strdup_printf("%04x.%04x", USB_VID_SIPEED, model->pid);
 		/* Find all slogic compatible devices. */
 		conn_devices = sr_usb_find(drvc->sr_ctx->libusb_ctx, conn);
@@ -502,8 +462,84 @@ static struct sr_dev_driver sipeed_slogic_analyzer_driver_info = {
 SR_REGISTER_DEV_DRIVER(sipeed_slogic_analyzer_driver_info);
 
 
-static int slogic_usb_control_write(const struct sr_dev_inst *sdi, uint8_t request, uint16_t value, uint16_t index, uint8_t *data, size_t len, int timeout);
-static int slogic_usb_control_read(const struct sr_dev_inst *sdi, uint8_t request, uint16_t value, uint16_t index, uint8_t *data, size_t len, int timeout);
+
+static int slogic_usb_control_write(const struct sr_dev_inst *sdi, uint8_t request, uint16_t value, uint16_t index, uint8_t *data, size_t len, int timeout)
+{
+	int ret;
+	struct dev_context *devc;
+	struct sr_usb_dev_inst *usb;
+
+	devc = sdi->priv;
+	usb  = sdi->conn;
+
+	sr_spew("%s: req:%u value:%u index:%u %p:%u in %dms.", __func__, request, value, index, data, len, timeout);
+	if (!data && len) {
+		sr_warn("%s: Nothing to write although len(%u)>0!", __func__, len);
+		len = 0;
+	} else if (len & 0x3) {
+		size_t len_aligndup = (len + 0x3)&(~0x3);
+		sr_warn("%s: Align up to %u(from %u)!", __func__, len_aligndup, len);
+		len = len_aligndup;
+	}
+
+	ret = 0;
+	for (size_t i = 0; i < len; i+=4) {
+		ret += libusb_control_transfer(
+			usb->devhdl, LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_ENDPOINT_OUT,
+			request,
+			value + i, index,
+			(unsigned char *)data + i, 4,
+			timeout
+		);
+		if (ret < 0) {
+			sr_err("%s: failed(libusb: %s)!", __func__, libusb_error_name(ret));
+			return SR_ERR_NA;
+		}
+	}
+
+	return ret;
+}
+
+
+static int slogic_usb_control_read(const struct sr_dev_inst *sdi, uint8_t request, uint16_t value, uint16_t index, uint8_t *data, size_t len, int timeout)
+{
+	int ret;
+	struct dev_context *devc;
+	struct sr_usb_dev_inst *usb;
+
+	devc = sdi->priv;
+	usb  = sdi->conn;
+
+	sr_spew("%s: req:%u value:%u index:%u %p:%u in %dms.", __func__, request, value, index, data, len, timeout);
+	if (!data && len) {
+		sr_err("%s: Can't read to NULL while len(%u)>0!", __func__, len);
+		return SR_ERR_ARG;
+	} else if (len & 0x3) {
+		size_t len_aligndup = (len + 0x3)&(~0x3);
+		sr_warn("%s: Align up to %u(from %u)!", __func__, len_aligndup, len);
+		len = len_aligndup;
+	}
+
+	ret = 0;
+	for (size_t i = 0; i < len; i+=4) {
+		ret += libusb_control_transfer(
+			usb->devhdl, LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_ENDPOINT_IN,
+			request,
+			value + i, index,
+			(unsigned char *)data + i, 4,
+			timeout
+		);
+		if (ret < 0) {
+			sr_err("%s: failed(libusb: %s)!", __func__, libusb_error_name(ret));
+			return SR_ERR_NA;
+		}
+	}
+
+	return ret;
+}
+
+
+
 
 static void slogic_submit_raw_data(void *data, size_t len, const struct sr_dev_inst *sdi) {
 	struct dev_context *devc = sdi->priv;
@@ -535,6 +571,26 @@ static void slogic_submit_raw_data(void *data, size_t len, const struct sr_dev_i
 		free(ptr);
 }
 
+static inline uint16_t htole16(uint16_t value) {
+    return ((value & 0xFF) << 8) | ((value >> 8) & 0xFF);
+}
+
+static inline void clear_ep(const struct sr_dev_inst *sdi) {
+	struct dev_context *devc = sdi->priv;
+	struct sr_usb_dev_inst *usb = sdi->conn;
+	uint8_t ep = devc->model->ep_in;
+
+	size_t tmp_size = 4 * 1024 * 1024;
+	uint8_t *tmp = malloc(tmp_size);
+	int actual_length = 0;
+	do {
+		libusb_bulk_transfer(usb->devhdl, ep,
+				tmp, tmp_size, &actual_length, 100);
+	} while (actual_length);
+	free(tmp);
+	sr_dbg("Cleared EP: 0x%02x", ep);
+}
+
 /* SLogic Combo 8 start */
 #pragma pack(push, 1)
 struct cmd_start_acquisition {
@@ -555,7 +611,7 @@ struct cmd_start_acquisition {
 static int slogic_combo8_remote_run(const struct sr_dev_inst *sdi) {
 	struct dev_context *devc = sdi->priv;
 	const struct cmd_start_acquisition cmd_run = {
-		.sample_rate = devc->cur_samplerate / SR_MHZ(1),
+		.sample_rate = htole16(devc->cur_samplerate / SR_MHZ(1)),  // force little endian
 		.sample_channel = devc->cur_samplechannel,
 	};
 	return slogic_usb_control_write(sdi, CMD_START, 0x0000, 0x0000, (uint8_t *)&cmd_run, sizeof(cmd_run), 500);
@@ -713,77 +769,41 @@ static int slogic16U3_remote_stop(const struct sr_dev_inst *sdi) {
 }
 /* SLogic16U3 end */
 
-static int slogic_usb_control_write(const struct sr_dev_inst *sdi, uint8_t request, uint16_t value, uint16_t index, uint8_t *data, size_t len, int timeout)
-{
-	int ret;
-	struct dev_context *devc;
-	struct sr_usb_dev_inst *usb;
 
-	devc = sdi->priv;
-	usb  = sdi->conn;
 
-	sr_spew("%s: req:%u value:%u index:%u %p:%u in %dms.", __func__, request, value, index, data, len, timeout);
-	if (!data && len) {
-		sr_warn("%s: Nothing to write although len(%u)>0!", __func__, len);
-		len = 0;
-	} else if (len & 0x3) {
-		size_t len_aligndup = (len + 0x3)&(~0x3);
-		sr_warn("%s: Align up to %u(from %u)!", __func__, len_aligndup, len);
-		len = len_aligndup;
+
+
+static const struct slogic_model support_models[] = {
+	{
+		.name = "Sogic Combo 8",
+		.pid = 0x0300,
+		.ep_in = 0x01 | LIBUSB_ENDPOINT_IN,
+		.max_samplerate = SR_MHZ(160),
+		.max_samplechannel = 8,
+		.max_bandwidth = SR_MHZ(320),
+		.operation = {
+			.remote_run = slogic_combo8_remote_run,
+			.remote_stop = slogic_combo8_remote_stop,
+		},
+		.submit_raw_data = slogic_submit_raw_data,
+	},
+	{
+		.name = "SLogic16U3",
+		.pid = 0x3031,
+		.ep_in = 0x02 | LIBUSB_ENDPOINT_IN,
+		.max_samplerate = SR_MHZ(1600),
+		.max_samplechannel = 16,
+		.max_bandwidth = SR_MHZ(3200),
+		.operation = {
+			.remote_run = slogic16U3_remote_run,
+			.remote_stop = slogic16U3_remote_stop,
+		},
+		.submit_raw_data = slogic_submit_raw_data,
+	},
+	{
+		.name = NULL,
+		.pid = 0x0000,
 	}
+};
 
-	ret = 0;
-	for (size_t i = 0; i < len; i+=4) {
-		ret += libusb_control_transfer(
-			usb->devhdl, LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_ENDPOINT_OUT,
-			request,
-			value + i, index,
-			(unsigned char *)data + i, 4,
-			timeout
-		);
-		if (ret < 0) {
-			sr_err("%s: failed(libusb: %s)!", __func__, libusb_error_name(ret));
-			return SR_ERR_NA;
-		}
-	}
-
-	return ret;
-}
-
-
-static int slogic_usb_control_read(const struct sr_dev_inst *sdi, uint8_t request, uint16_t value, uint16_t index, uint8_t *data, size_t len, int timeout)
-{
-	int ret;
-	struct dev_context *devc;
-	struct sr_usb_dev_inst *usb;
-
-	devc = sdi->priv;
-	usb  = sdi->conn;
-
-	sr_spew("%s: req:%u value:%u index:%u %p:%u in %dms.", __func__, request, value, index, data, len, timeout);
-	if (!data && len) {
-		sr_err("%s: Can't read to NULL while len(%u)>0!", __func__, len);
-		return SR_ERR_ARG;
-	} else if (len & 0x3) {
-		size_t len_aligndup = (len + 0x3)&(~0x3);
-		sr_warn("%s: Align up to %u(from %u)!", __func__, len_aligndup, len);
-		len = len_aligndup;
-	}
-
-	ret = 0;
-	for (size_t i = 0; i < len; i+=4) {
-		ret += libusb_control_transfer(
-			usb->devhdl, LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_ENDPOINT_IN,
-			request,
-			value + i, index,
-			(unsigned char *)data + i, 4,
-			timeout
-		);
-		if (ret < 0) {
-			sr_err("%s: failed(libusb: %s)!", __func__, libusb_error_name(ret));
-			return SR_ERR_NA;
-		}
-	}
-
-	return ret;
-}
+static struct slogic_model *const support_models_ptr = &support_models[0];

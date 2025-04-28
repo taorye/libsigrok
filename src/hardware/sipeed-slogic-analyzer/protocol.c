@@ -279,7 +279,6 @@ SR_PRIV int sipeed_slogic_acquisition_start(const struct sr_dev_inst *sdi)
 		sr_err("Unhandled `CMD_STOP`");
 		return ret;
 	}
-	// clear_ep(sdi);
 
 	devc->samples_got_nbytes = 0;
 	devc->samples_need_nbytes = devc->cur_limit_samples * devc->cur_samplechannel / 8;

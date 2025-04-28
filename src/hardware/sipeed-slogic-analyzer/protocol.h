@@ -106,20 +106,4 @@ struct dev_context {
 SR_PRIV int sipeed_slogic_acquisition_start(const struct sr_dev_inst *sdi);
 SR_PRIV int sipeed_slogic_acquisition_stop(struct sr_dev_inst *sdi);
 
-static inline void clear_ep(const struct sr_dev_inst *sdi) {
-	struct dev_context *devc = sdi->priv;
-	struct sr_usb_dev_inst *usb = sdi->conn;
-	uint8_t ep = devc->model->ep_in;
-
-	size_t tmp_size = 4 * 1024 * 1024;
-	uint8_t *tmp = malloc(tmp_size);
-	int actual_length = 0;
-	do {
-		libusb_bulk_transfer(usb->devhdl, ep,
-				tmp, tmp_size, &actual_length, 100);
-	} while (actual_length);
-	free(tmp);
-	sr_dbg("Cleared EP: 0x%02x", ep);
-}
-
 #endif

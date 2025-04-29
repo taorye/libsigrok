@@ -631,9 +631,19 @@ static void slogic_submit_raw_data(void *data, size_t len,
 		free(ptr);
 }
 
+// #define __USE_MISC 1
+// #include <endian.h>
 static inline uint16_t htole16(uint16_t value)
 {
-	return ((value & 0xFF) << 8) | ((value >> 8) & 0xFF);
+	const union {
+		uint16_t val;
+		uint8_t bytes[2];
+	} u = { .val = 0x1234 };
+	if (u.bytes[0] == 0x34) { // __LITTLE_ENDIAN
+		return value;
+	} else {
+		return ((value & 0xFF) << 8) | ((value >> 8) & 0xFF);
+	}
 }
 
 static inline void clear_ep(const struct sr_dev_inst *sdi)

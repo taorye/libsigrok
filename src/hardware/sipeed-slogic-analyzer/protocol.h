@@ -38,6 +38,8 @@
 enum {
 	PATTERN_MODE_NOMAL,
 	PATTERN_MODE_TEST_MAX_SPEED,
+	PATTERN_MODE_TEST_HARDWARE_USB_MAX_SPEED,
+	PATTERN_MODE_TEST_HARDWARE_EMU_DATA,
 };
 
 struct slogic_model {
@@ -48,6 +50,7 @@ struct slogic_model {
 	uint64_t max_samplechannel; // limit by hardware
 	uint64_t max_bandwidth; // limit by hardware
 	struct {
+		int (*remote_reset)(const struct sr_dev_inst *sdi);
 		int (*remote_run)(const struct sr_dev_inst *sdi);
 		int (*remote_stop)(const struct sr_dev_inst *sdi);
 	} operation;

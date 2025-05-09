@@ -22,6 +22,8 @@
 
 #include "protocol.h"
 
+static int slogic16U3_remote_test_mode(const struct sr_dev_inst *sdi, uint32_t mode);
+
 static const uint32_t scanopts[] = {
 	SR_CONF_CONN,
 };
@@ -78,6 +80,8 @@ static const uint64_t buffersizes[] = { 2, 4, 8, 16 };
 static const char *patterns[] = {
 	[PATTERN_MODE_NOMAL] = "PATTERN_MODE_NOMAL",
 	[PATTERN_MODE_TEST_MAX_SPEED] = "PATTERN_MODE_TEST_MAX_SPEED",
+	[PATTERN_MODE_TEST_HARDWARE_USB_MAX_SPEED] = "PATTERN_MODE_TEST_HARDWARE_USB_MAX_SPEED",
+	[PATTERN_MODE_TEST_HARDWARE_EMU_DATA] = "PATTERN_MODE_TEST_HARDWARE_EMU_DATA",
 };
 
 static const int32_t trigger_matches[] = {
@@ -282,6 +286,9 @@ static int dev_open(struct sr_dev_inst *sdi)
 		return SR_ERR_MALLOC;
 	}
 
+	if (devc->model->operation.remote_reset)
+		devc->model->operation.remote_reset(sdi);
+
 	return std_dummy_dev_open(sdi);
 }
 
@@ -429,6 +436,20 @@ static int config_set(uint32_t key, GVariant *data,
 			std_str_idx(data, ARRAY_AND_SIZE(patterns));
 		if (devc->cur_pattern_mode_idx < 0)
 			devc->cur_pattern_mode_idx = 0;
+		if (devc->model != &support_models_ptr[1]) {
+			sr_warn("unsupported model: %s.", devc->model->name);
+			break;
+		}
+		if (devc->cur_pattern_mode_idx == PATTERN_MODE_NOMAL) {
+			if (devc->model->operation.remote_reset)
+				devc->model->operation.remote_reset(sdi);
+			slogic16U3_remote_test_mode(sdi, 0x0);
+			sr_dbg("reset model: %s success.", devc->model->name);
+		} else if (devc->cur_pattern_mode_idx == PATTERN_MODE_TEST_HARDWARE_USB_MAX_SPEED) {
+			slogic16U3_remote_test_mode(sdi, 0x1);
+		} else if (devc->cur_pattern_mode_idx == PATTERN_MODE_TEST_HARDWARE_EMU_DATA) {
+			slogic16U3_remote_test_mode(sdi, 0x2);
+		}
 		break;
 	case SR_CONF_LIMIT_SAMPLES:
 		devc->cur_limit_samples = g_variant_get_uint64(data);
@@ -713,16 +734,77 @@ static int slogic_combo8_remote_stop(const struct sr_dev_inst *sdi)
 #define SLOGIC16U3_R32_FLAG 0x0008
 #define SLOGIC16U3_R32_AUX 0x000c
 
+static int slogic16U3_remote_test_mode(const struct sr_dev_inst *sdi, uint32_t mode) {
+	struct dev_context *devc = sdi->priv;
+	uint8_t cmd_aux[64] = { 0 }; // configure aux
+
+	{
+		size_t retry = 0;
+		memset(cmd_aux, 0, sizeof(cmd_aux));
+		*(uint32_t *)(cmd_aux) = 0x00000005;
+		slogic_usb_control_write(sdi,
+					 SLOGIC16U3_CONTROL_OUT_REQ_REG_WRITE,
+					 SLOGIC16U3_R32_AUX, 0x0000, cmd_aux, 4,
+					 500);
+		do {
+			slogic_usb_control_read(
+				sdi, SLOGIC16U3_CONTROL_IN_REQ_REG_READ,
+				SLOGIC16U3_R32_AUX, 0x0000, cmd_aux, 4, 500);
+			sr_dbg("[%u]read testmode: %08x.", retry,
+			       ((uint32_t *)cmd_aux)[0]);
+			retry += 1;
+			if (retry > 5)
+				return SR_ERR_TIMEOUT;
+		} while (!(cmd_aux[2] & 0x01));
+
+		sr_dbg("test_mode length: %u.", (*(uint16_t *)cmd_aux) >> 9);
+		slogic_usb_control_read(sdi, SLOGIC16U3_CONTROL_IN_REQ_REG_READ,
+					SLOGIC16U3_R32_AUX + 4, 0x0000,
+					cmd_aux + 4,
+					(*(uint16_t *)cmd_aux) >> 9, 500);
+
+		sr_dbg("aux: %u %u %u %u %08x.", cmd_aux[0], cmd_aux[1],
+		       cmd_aux[2], cmd_aux[3], ((uint32_t *)(cmd_aux + 4))[0]);
+
+		((uint32_t *)(cmd_aux + 4))[0] = mode;
+
+		sr_dbg("aux: %u %u %u %u %08x.", cmd_aux[0], cmd_aux[1],
+		       cmd_aux[2], cmd_aux[3], ((uint32_t *)(cmd_aux + 4))[0]);
+		slogic_usb_control_write(sdi,
+					 SLOGIC16U3_CONTROL_OUT_REQ_REG_WRITE,
+					 SLOGIC16U3_R32_AUX + 4, 0x0000,
+					 cmd_aux + 4,
+					 (*(uint16_t *)cmd_aux) >> 9, 500);
+
+		slogic_usb_control_read(sdi, SLOGIC16U3_CONTROL_IN_REQ_REG_READ,
+					SLOGIC16U3_R32_AUX + 4, 0x0000,
+					cmd_aux + 4,
+					(*(uint16_t *)cmd_aux) >> 9, 500);
+		sr_dbg("aux: %u %u %u %u %08x.", cmd_aux[0], cmd_aux[1],
+		       cmd_aux[2], cmd_aux[3], ((uint32_t *)(cmd_aux + 4))[0]);
+
+		if (mode != *(uint32_t *)(cmd_aux + 4)) {
+			sr_dbg("Failed to configure test_mode.");
+		} else {
+			sr_dbg("Succeed to configure test_mode.");
+		}
+	}
+}
+
+static int slogic16U3_remote_reset(const struct sr_dev_inst *sdi) {
+	struct dev_context *devc = sdi->priv;
+	const uint8_t cmd_rst[] = { 0x02, 0x00, 0x00, 0x00 };
+
+	return slogic_usb_control_write(sdi, SLOGIC16U3_CONTROL_OUT_REQ_REG_WRITE,
+				 SLOGIC16U3_R32_CTRL, 0x0000,
+				 ARRAY_AND_SIZE(cmd_rst), 500);
+}
+
 static int slogic16U3_remote_run(const struct sr_dev_inst *sdi)
 {
 	struct dev_context *devc = sdi->priv;
-	const uint8_t cmd_derst[] = { 0x00, 0x00, 0x00, 0x00 };
 	const uint8_t cmd_run[] = { 0x01, 0x00, 0x00, 0x00 };
 	uint8_t cmd_aux[64] = { 0 }; // configure aux
-
-	slogic_usb_control_write(sdi, SLOGIC16U3_CONTROL_OUT_REQ_REG_WRITE,
-				 SLOGIC16U3_R32_CTRL, 0x0000,
-				 ARRAY_AND_SIZE(cmd_derst), 500);
 
 	{
 		size_t retry = 0;
@@ -917,11 +999,11 @@ static int slogic16U3_remote_run(const struct sr_dev_inst *sdi)
 
 static int slogic16U3_remote_stop(const struct sr_dev_inst *sdi)
 {
-	const uint8_t cmd_rst[] = { 0x02, 0x00, 0x00, 0x00 };
+	const uint8_t cmd_stop[] = { 0x00, 0x00, 0x00, 0x00 };
 	return slogic_usb_control_write(sdi,
 					SLOGIC16U3_CONTROL_OUT_REQ_REG_WRITE,
 					SLOGIC16U3_R32_CTRL, 0x0000,
-					ARRAY_AND_SIZE(cmd_rst), 500);
+					ARRAY_AND_SIZE(cmd_stop), 500);
 }
 /* SLogic16U3 end */
 
@@ -935,6 +1017,7 @@ static const struct slogic_model support_models[] = {
         .max_bandwidth = SR_MHZ(320),
         .operation =
             {
+                .remote_reset = NULL,
                 .remote_run = slogic_combo8_remote_run,
                 .remote_stop = slogic_combo8_remote_stop,
             },
@@ -949,6 +1032,7 @@ static const struct slogic_model support_models[] = {
         .max_bandwidth = SR_MHZ(3200),
         .operation =
             {
+                .remote_reset = slogic16U3_remote_reset,
                 .remote_run = slogic16U3_remote_run,
                 .remote_stop = slogic16U3_remote_stop,
             },

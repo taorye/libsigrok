@@ -794,10 +794,15 @@ static int slogic16U3_remote_test_mode(const struct sr_dev_inst *sdi, uint32_t m
 static int slogic16U3_remote_reset(const struct sr_dev_inst *sdi) {
 	struct dev_context *devc = sdi->priv;
 	const uint8_t cmd_rst[] = { 0x02, 0x00, 0x00, 0x00 };
+	const uint8_t cmd_derst[] = { 0x00, 0x00, 0x00, 0x00 };
+
+	slogic_usb_control_write(sdi, SLOGIC16U3_CONTROL_OUT_REQ_REG_WRITE,
+		SLOGIC16U3_R32_CTRL, 0x0000,
+		ARRAY_AND_SIZE(cmd_rst), 500);
 
 	return slogic_usb_control_write(sdi, SLOGIC16U3_CONTROL_OUT_REQ_REG_WRITE,
 				 SLOGIC16U3_R32_CTRL, 0x0000,
-				 ARRAY_AND_SIZE(cmd_rst), 500);
+				 ARRAY_AND_SIZE(cmd_derst), 500);
 }
 
 static int slogic16U3_remote_run(const struct sr_dev_inst *sdi)

@@ -146,7 +146,7 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer)
 			       devc->per_transfer_duration *
 				       (devc->num_transfers_completed + 1),
 			       TRANSFERS_DURATION_TOLERANCE * 100);
-			devc->acq_aborted = 1;
+			// devc->acq_aborted = 1;
 		}
 	} else {
 		devc->timeout_count = 0;

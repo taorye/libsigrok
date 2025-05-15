@@ -909,7 +909,7 @@ static int slogic16U3_remote_run(const struct sr_dev_inst *sdi)
 				continue;
 			}
 			uint32_t div = base / devc->cur_samplerate;
-			((uint32_t *)(cmd_aux + 4))[1] = div;
+			((uint32_t *)(cmd_aux + 4))[1] = div-1;
 
 			sr_dbg("aux: %u %u %u %u %x %u %u.", cmd_aux[0],
 			       cmd_aux[1], cmd_aux[2], cmd_aux[3],

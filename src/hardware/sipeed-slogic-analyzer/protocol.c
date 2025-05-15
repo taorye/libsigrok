@@ -196,11 +196,16 @@ static int handle_events(int fd, int revents, void *cb_data)
 			}
 			if (freed) {
 				sr_dbg("Freed %d transfers.", freed);
-			} else if (!g_async_queue_length(
+			} else {
+				if ((devc->model->operation.remote_stop(sdi)) < 0) {
+					sr_err("Unhandled `CMD_STOP`");
+				}
+				if (!g_async_queue_length(
 					   devc->raw_data_queue)) {
-				sr_dbg("Freed all transfers.");
-				g_async_queue_unref(devc->raw_data_queue);
-				devc->raw_data_queue = NULL;
+					sr_dbg("Freed all transfers.");
+					g_async_queue_unref(devc->raw_data_queue);
+					devc->raw_data_queue = NULL;
+				}
 			}
 		}
 	}

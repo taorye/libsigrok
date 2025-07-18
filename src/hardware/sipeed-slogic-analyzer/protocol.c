@@ -146,7 +146,7 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer)
 			       devc->per_transfer_duration *
 				       (devc->num_transfers_completed + 1),
 			       TRANSFERS_DURATION_TOLERANCE * 100);
-			// devc->acq_aborted = 1;
+			devc->acq_aborted = 1;
 		}
 	} else {
 		devc->timeout_count = 0;
@@ -220,11 +220,9 @@ static int handle_events(int fd, int revents, void *cb_data)
 	} else if (g_async_queue_length(devc->raw_data_queue)) {
 		GByteArray *array = g_async_queue_try_pop(devc->raw_data_queue);
 		if (array != NULL) {
-			if (!devc->acq_aborted) {
-				if (devc->trigger_fired) {
-					devc->model->submit_raw_data(
-						array->data, array->len, sdi);
-				}
+			if (devc->trigger_fired) {
+				devc->model->submit_raw_data(
+					array->data, array->len, sdi);
 			}
 			g_byte_array_unref(array);
 		}

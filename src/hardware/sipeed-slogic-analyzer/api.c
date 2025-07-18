@@ -59,9 +59,12 @@ static const uint64_t samplerates[] = {
 	/* x 8ch */
 	SR_MHZ(40),
 	/* x 4ch */
+	SR_MHZ(60),
 	SR_MHZ(80),
+	SR_MHZ(100),
 	/* x 2ch */
 	SR_MHZ(125),
+	SR_MHZ(150),
 	SR_MHZ(160),
 
 	/* SLogic16U3 */
@@ -70,8 +73,12 @@ static const uint64_t samplerates[] = {
 	/* x 8ch */
 	SR_MHZ(400),
 	/* x 4ch */
+	SR_MHZ(500),
+	SR_MHZ(600),
 	SR_MHZ(800),
 	/* x 2ch */
+	SR_MHZ(1000),
+	SR_MHZ(1200),
 	SR_MHZ(1600),
 };
 
@@ -504,7 +511,7 @@ static int config_list(uint32_t key, GVariant **data,
 		*data = std_gvar_array_i32(ARRAY_AND_SIZE(trigger_matches));
 		break;
 	case SR_CONF_VOLTAGE_THRESHOLD:
-		*data = std_gvar_min_max_step_thresholds(0, 1.6, 0.1);
+		*data = std_gvar_min_max_step_thresholds(0, 333, 1);
 		break;
 	default:
 		ret = SR_ERR_NA;
@@ -972,7 +979,7 @@ static int slogic16U3_remote_run(const struct sr_dev_inst *sdi)
 		((uint32_t *)(cmd_aux + 4))[0] =
 			(uint32_t)((devc->voltage_threshold[0] +
 				    devc->voltage_threshold[1]) /
-				   2 / 1.65 * 1023);
+				   2 / 333 * 1024);
 
 		sr_dbg("aux: %u %u %u %u %08x.", cmd_aux[0], cmd_aux[1],
 		       cmd_aux[2], cmd_aux[3], ((uint32_t *)(cmd_aux + 4))[0]);

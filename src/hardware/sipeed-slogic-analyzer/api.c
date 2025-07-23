@@ -71,14 +71,17 @@ static const uint64_t samplerates[] = {
 	/* x 16ch */
 	SR_MHZ(200),
 	/* x 8ch */
+	SR_MHZ(300),
 	SR_MHZ(400),
 	/* x 4ch */
 	SR_MHZ(500),
 	SR_MHZ(600),
+	SR_MHZ(750),
 	SR_MHZ(800),
 	/* x 2ch */
 	SR_MHZ(1000),
 	SR_MHZ(1200),
+	SR_MHZ(1500),
 	SR_MHZ(1600),
 };
 

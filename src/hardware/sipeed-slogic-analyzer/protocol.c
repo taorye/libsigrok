@@ -205,6 +205,12 @@ static int handle_events(int fd, int revents, void *cb_data)
 					sr_dbg("Freed all transfers.");
 					g_async_queue_unref(devc->raw_data_queue);
 					devc->raw_data_queue = NULL;
+
+					if (devc->stl) {
+						soft_trigger_logic_free(devc->stl);
+						devc->stl = NULL;
+						devc->trigger_fired = FALSE;
+					}
 				}
 			}
 		}
@@ -223,6 +229,14 @@ static int handle_events(int fd, int revents, void *cb_data)
 			if (devc->trigger_fired) {
 				devc->model->submit_raw_data(
 					array->data, array->len, sdi);
+			} else if (devc->stl) {
+				devc->samples_got_nbytes = 0;
+				extern int slogic_soft_trigger_raw_data(void *data, size_t len, const struct sr_dev_inst *sdi);
+				int sent_samples = slogic_soft_trigger_raw_data(array->data, array->len, sdi);
+				if (sent_samples) {
+					devc->samples_got_nbytes += sent_samples * devc->cur_samplechannel / 8;
+					devc->trigger_fired = TRUE;
+				}
 			}
 			g_byte_array_unref(array);
 		}
@@ -408,8 +422,21 @@ SR_PRIV int sipeed_slogic_acquisition_start(const struct sr_dev_inst *sdi)
 			      (devc->per_transfer_duration / 2) ?: 1,
 			      handle_events, (void *)sdi);
 
-	// TODO: need trigger working
 	devc->trigger_fired = TRUE;
+
+	devc->capture_ratio = 10;
+	struct sr_trigger *trigger = NULL;
+	/* Setup triggers */
+	if ((trigger = sr_session_trigger_get(sdi->session))) {
+		int pre_trigger_samples = 0;
+		if (devc->cur_limit_samples > 0)
+			pre_trigger_samples = (devc->capture_ratio * devc->cur_limit_samples) / 100;
+		devc->stl = soft_trigger_logic_new(sdi, trigger, pre_trigger_samples);
+		if (!devc->stl)
+			return SR_ERR_MALLOC;
+		devc->trigger_fired = FALSE;
+	}
+
 	if ((ret = devc->model->operation.remote_run(sdi)) < 0) {
 		sr_err("Unhandled `CMD_RUN`");
 		sipeed_slogic_acquisition_stop(sdi);
@@ -429,7 +456,6 @@ SR_PRIV int sipeed_slogic_acquisition_stop(struct sr_dev_inst *sdi)
 
 	devc = sdi->priv;
 
-	devc->trigger_fired = FALSE;
 	devc->acq_aborted = 1;
 
 	return SR_OK;

@@ -38,7 +38,7 @@ static const uint32_t devopts[] = {
 	SR_CONF_LIMIT_SAMPLES | SR_CONF_GET | SR_CONF_SET,
 	SR_CONF_PATTERN_MODE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
 	SR_CONF_SAMPLERATE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
-	SR_CONF_TRIGGER_MATCH | SR_CONF_GET | SR_CONF_LIST,
+	SR_CONF_TRIGGER_MATCH | SR_CONF_LIST,
 	SR_CONF_VOLTAGE_THRESHOLD | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
 };
 
@@ -660,6 +660,54 @@ static void slogic_submit_raw_data(void *data, size_t len,
 
 	if (nCh < 8)
 		free(ptr);
+}
+
+int slogic_soft_trigger_raw_data(void *data, size_t len,
+				   const struct sr_dev_inst *sdi)
+{
+	int ret = 0;
+	struct dev_context *devc = sdi->priv;
+
+	uint8_t *ptr = data;
+	uint64_t nCh = devc->cur_samplechannel;
+	uint8_t uintsize = (nCh + 7) / 8;
+
+	if (nCh < 8) {
+		size_t nsp_in_bytes = 8 / nCh; // NOW must be 2 or 4
+		ptr = malloc(len * nsp_in_bytes);
+		for (size_t i = 0; i < len; i += nCh) {
+			for (size_t j = 0; j < 8; j++) {
+				ptr[i * nsp_in_bytes + j] =
+					(((uint8_t *)
+						  data)[i + j / nsp_in_bytes] >>
+					 (j % nsp_in_bytes * nCh)) &
+					((1 << nCh) - 1);
+			}
+		}
+		len *= nsp_in_bytes; // need reshape
+	}
+
+	int pre_trigger_samples;
+	devc->stl->unitsize = uintsize;
+	int64_t trigger_offset = soft_trigger_logic_check(devc->stl, ptr, len, &pre_trigger_samples);
+	if (trigger_offset > -1) {
+		ret += pre_trigger_samples;
+
+		sr_session_send(sdi, &(struct sr_datafeed_packet){
+				     .type = SR_DF_LOGIC,
+				     .payload = &(struct sr_datafeed_logic){
+					     .length = len - trigger_offset * uintsize,
+					     .unitsize = uintsize,
+					     .data = ptr + trigger_offset * uintsize,
+				     } });
+
+		ret += len / uintsize - trigger_offset;
+	}
+
+	if (nCh < 8)
+		free(ptr);
+
+	return ret;
 }
 
 // #define __USE_MISC 1

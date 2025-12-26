@@ -122,6 +122,28 @@ static const uint64_t limit_samplerates_slogic16u3[] =
 	{ /*SR_MHZ(1500), */SR_MHZ(800), SR_MHZ(400), SR_MHZ(200) };
 #endif
 
+static const uint64_t samplerates_slogic32u3[] = {
+	SR_MHZ(5),
+	SR_MHZ(8),
+	SR_MHZ(10),
+	SR_MHZ(16),
+	SR_MHZ(20),
+	SR_MHZ(25),
+	SR_MHZ(32),
+	SR_MHZ(40),
+	SR_MHZ(50),
+	SR_MHZ(80),
+	SR_MHZ(100),
+	SR_MHZ(160),
+	SR_MHZ(200),
+	SR_MHZ(400),
+	SR_MHZ(800),
+	SR_MHZ(1600),
+};
+static const int32_t samplechannels_slogic32u3[] = { /*2, */4, 8, 16 , 32 };
+static const uint64_t limit_samplerates_slogic32u3[] = 
+	{ SR_MHZ(1600), SR_MHZ(800), SR_MHZ(400), SR_MHZ(200) };
+
 static const char *patterns[] = {
 	[PATTERN_MODE_NORMAL] = "Normal",
 	[PATTERN_MODE_TEST_HARDWARE_USB_MAX_SPEED] = "USB connection test",
@@ -1181,6 +1203,24 @@ static const struct slogic_model support_models[] = {
 		.samplechannel_table = samplechannels_slogic16u3,
 		.samplechannel_table_size = ARRAY_SIZE(samplechannels_slogic16u3),
 		.limit_samplerate_table = limit_samplerates_slogic16u3,
+        .operation =
+            {
+                .remote_reset = slogic16U3_remote_reset,
+                .remote_run = slogic16U3_remote_run,
+                .remote_stop = slogic16U3_remote_stop,
+            },
+        .submit_raw_data = slogic_submit_raw_data,
+    },
+    {
+        .name = "SLogic32U3",
+        .pid = 0x3032,
+        .ep_in = 0x02 | LIBUSB_ENDPOINT_IN,
+        .max_bandwidth = SR_MHZ(6400),
+		.samplerate_table = samplerates_slogic32u3,
+		.samplerate_table_size = ARRAY_SIZE(samplerates_slogic32u3),
+		.samplechannel_table = samplechannels_slogic32u3,
+		.samplechannel_table_size = ARRAY_SIZE(samplechannels_slogic32u3),
+		.limit_samplerate_table = limit_samplerates_slogic32u3,
         .operation =
             {
                 .remote_reset = slogic16U3_remote_reset,

@@ -506,7 +506,7 @@ static int config_set(uint32_t key, GVariant *data,
 			std_str_idx(data, ARRAY_AND_SIZE(patterns));
 		if (devc->cur_pattern_mode_idx < 0)
 			devc->cur_pattern_mode_idx = 0;
-		if (devc->model != &support_models_ptr[1]) {
+		if (devc->model == &support_models_ptr[0]) {
 			sr_warn("unsupported model: %s.", devc->model->name);
 			break;
 		}
@@ -1008,7 +1008,7 @@ static int slogic16U3_remote_run(const struct sr_dev_inst *sdi)
 
 		sr_dbg("aux rd: %08x %08x.", ((uint32_t *)cmd_aux)[0], ((uint32_t *)(cmd_aux + 4))[0]);
 
-		*(uint32_t *)(cmd_aux + 4) = (1 << devc->cur_samplechannel) - 1;
+		*(uint32_t *)(cmd_aux + 4) = (1ull << devc->cur_samplechannel) - 1;
 
 		sr_dbg("aux wr: %08x %08x.", ((uint32_t *)cmd_aux)[0], ((uint32_t *)(cmd_aux + 4))[0]);
 		slogic_usb_control_write(sdi,
@@ -1023,7 +1023,7 @@ static int slogic16U3_remote_run(const struct sr_dev_inst *sdi)
 					(*(uint16_t *)cmd_aux) >> 9, 500);
 		sr_dbg("aux rd: %08x %08x.", ((uint32_t *)cmd_aux)[0], ((uint32_t *)(cmd_aux + 4))[0]);
 
-		if ((1 << devc->cur_samplechannel) - 1 !=
+		if ((1ull << devc->cur_samplechannel) - 1 !=
 		    *(uint32_t *)(cmd_aux + 4)) {
 			sr_dbg("Failed to configure sample channel.");
 		} else {

@@ -92,6 +92,7 @@ struct dev_context {
 
 		size_t num_transfers_completed;
 		size_t num_transfers_used;
+		size_t timeout_count_limit;
 		struct libusb_transfer *transfers[NUM_MAX_TRANSFERS];
 
 		uint64_t transfers_reached_nbytes; /* real received bytes in all */

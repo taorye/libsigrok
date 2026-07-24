@@ -41,6 +41,8 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer)
 		transfers_reached_time_now - devc->transfers_reached_time_start;
 
 	double expected_rate = devc->expected_rate_MBps;
+	double expected_transfer_duration =
+		(double)devc->per_transfer_nbytes / expected_rate;
 
 	devc->num_transfers_used -= 1;
 	devc->num_transfers_completed += 1;
@@ -147,8 +149,8 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer)
 	double actual_rate = (double)devc->transfers_reached_nbytes_latest / transfers_reached_duration;
 	double average_rate = (double)devc->transfers_reached_nbytes / transfers_all_duration;
 	if (devc->num_transfers_completed > 1 &&
-	    ((double)transfers_reached_duration / SR_KHZ(1) >
-		    (TRANSFERS_DURATION_TOLERANCE + 1) * devc->per_transfer_duration ||
+	    ((double)transfers_reached_duration >
+		    (TRANSFERS_DURATION_TOLERANCE + 1) * expected_transfer_duration ||
 		actual_rate < expected_rate * (1.0 - TRANSFERS_DURATION_TOLERANCE) ||
 		average_rate < expected_rate * 0.95
 	    )
@@ -158,22 +160,18 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer)
 		devc->timeout_count = 0;
 	}
 
-	if (devc->timeout_count > devc->num_transfers_used) {
-		sr_err("Timeout %.3fms!!! Rate %.2fMBps(avg)<%.0fMBps(exp) or Reach duration limit: %.3f(%u+%.1f%%), %.3f > "
-				"%.3f(%u+%.1f%%)(total) except first one.",
+	if (devc->timeout_count >= devc->timeout_count_limit) {
+		sr_err("Transfer timeout: duration %.3fms (limit %.3fms), "
+			"rate %.2fMBps (minimum %.2fMBps), average %.2fMBps "
+			"(minimum %.2fMBps), %" G_GUINT64_FORMAT
+			" consecutive slow transfers.",
 				(double)transfers_reached_duration / SR_KHZ(1),
-				average_rate, expected_rate,
 				(TRANSFERS_DURATION_TOLERANCE + 1) *
-					devc->per_transfer_duration,
-				devc->per_transfer_duration,
-				TRANSFERS_DURATION_TOLERANCE * 100,
-				(double)transfers_all_duration / SR_KHZ(1),
-				(TRANSFERS_DURATION_TOLERANCE + 1) *
-					devc->per_transfer_duration *
-					devc->num_transfers_completed,
-				devc->per_transfer_duration *
-					(devc->num_transfers_completed + 1),
-				TRANSFERS_DURATION_TOLERANCE * 100);
+					expected_transfer_duration / SR_KHZ(1),
+				actual_rate,
+				expected_rate * (1.0 - TRANSFERS_DURATION_TOLERANCE),
+				average_rate, expected_rate * 0.95,
+				devc->timeout_count);
 		devc->acq_aborted = 1;
 	}
 
@@ -433,6 +431,7 @@ SR_PRIV int sipeed_slogic_acquisition_start(const struct sr_dev_inst *sdi)
 		devc->transfers[devc->num_transfers_used] = transfer;
 		devc->num_transfers_used += 1;
 	}
+	devc->timeout_count_limit = devc->num_transfers_used;
 	sr_dbg("Submited %u transfers", devc->num_transfers_used);
 
 	if (!devc->num_transfers_used) {
